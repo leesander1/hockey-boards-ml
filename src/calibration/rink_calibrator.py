@@ -18,6 +18,8 @@ import cv2
 import numpy as np
 from scipy.ndimage import median_filter
 
+from src.calibration.trim_detector import TrimDetector
+
 # ── Tuning constants ──────────────────────────────────────────────────────────
 # Board height in pixels at top (far boards) and bottom (near boards) of frame.
 # Physical boards are 42 inches = 3.5 ft tall. Perspective foreshortening means
@@ -35,6 +37,7 @@ class RinkCalibrator:
     def __init__(self):
         self._ice_hull = None    # convex hull of ice contour (pts, shape=(N,1,2))
         self._ice_mask = None    # filled ice mask (uint8)
+        self._trim_detector = TrimDetector()   # primary board finder
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -56,18 +59,25 @@ class RinkCalibrator:
         """
         Returns a refined binary board mask (uint8, 255 = board ad zone).
 
-        Steps
-        -----
-        1. Extract the top-edge points from the ice convex hull.
-        2. Build a board polygon: top-edge shifted upward by perspective-scaled
-           board height, bottom = the ice top edge itself.
-        3. Colour gate: only board-like pixels within the polygon survive.
-        4. Morphological cleanup.
+        Primary method: TrimDetector — finds the yellow/gold kickplate at the
+        ice–board junction, then projects upward by a perspective-scaled height.
+
+        Fallback: column-wise ice-boundary projection (used when no trim visible).
         """
         if self._ice_mask is None:
             return None
 
         h, w = frame.shape[:2]
+
+        # ── Primary: trim-based detection ────────────────────────────────────
+        if self._trim_detector.detect(frame, ice_mask=self._ice_mask):
+            mask = self._trim_detector.get_board_mask(frame)
+            if mask is not None:
+                # Exclude scorebug zone
+                mask[:int(h * 0.20), :int(w * 0.27)] = 0
+                return mask
+
+        # ── Fallback: ice-boundary projection (original approach) ─────────────
 
         # ── 1. Find the topmost ice pixel per column ──────────────────────────
         # We use the filled ice mask column-by-column for the main profile, but
