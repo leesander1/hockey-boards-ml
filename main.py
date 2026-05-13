@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--output", type=str, help="Output destination (local file)")
     parser.add_argument("--stream", type=str, help="Output RTMP stream destination")
     parser.add_argument("--mock-inference", action="store_true", help="Run with mock inference for testing plumbing")
+    parser.add_argument("--max-frames", type=int, default=0, help="Maximum number of frames to process")
     
     args = parser.parse_args()
     
@@ -61,6 +62,10 @@ def main():
             frames_processed += 1
             if frames_processed % 30 == 0:
                 print(f"Processed {frames_processed} frames...")
+                
+            if args.max_frames > 0 and frames_processed >= args.max_frames:
+                print(f"Reached max frames limit ({args.max_frames}). Stopping.")
+                break
                 
     except KeyboardInterrupt:
         print("\nShutting down pipeline gracefully...")
