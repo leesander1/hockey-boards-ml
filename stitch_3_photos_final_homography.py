@@ -1,101 +1,158 @@
+"""
+Stitch all 6 screenshots into a full rink panorama.
+
+After inspecting the images, the spatial order left-to-right is:
+  ss4 (10.36.20) = LEFT END (goalie in net, end boards)
+  ss3 (10.36.10) = LEFT ZONE (faceoff circle, Toyota/Score Cash Back boards)  
+  ss5 (10.36.27) = LEFT-CENTER (center ice logo, APP boards)
+  ss2 (10.08.49) = CENTER-RIGHT (center ice, blue line right side)
+  ss1 (10.08.46) = RIGHT-CENTER (right faceoff dot, Energizer/Caesars boards)
+  ss0 (10.08.20) = RIGHT ZONE (far right end, possibly net)
+
+Strategy:
+  - Chain: each image is registered to its spatial neighbor
+  - Use SIFT on boards strip only
+  - Affine transform (no perspective distortion per frame)
+  - Distance-weighted blend for smooth seams
+"""
+
 import cv2
 import numpy as np
-import glob
+import glob, os
+
+OUT = "/Users/leesander/.gemini/antigravity/brain/d5aae78c-4b02-47aa-b503-4927926f04c0/artifacts/stitched_3_photos_final_homography.jpg"
+
+BOARD_TOP = 0.03
+BOARD_BOT = 0.45
+SCALE = 0.4   # 40% of original (3404 → ~1360px wide)
+
+
+def load_all():
+    files = sorted(glob.glob("src/Screenshot*.png"))
+    imgs = []
+    for f in files:
+        img = cv2.imread(f)
+        img = cv2.resize(img, (int(img.shape[1]*SCALE), int(img.shape[0]*SCALE)))
+        imgs.append((f, img))
+        print(f"  [{len(imgs)-1}] {f.split('at ')[1].strip()}: {img.shape}")
+    return imgs
+
+
+def board_mask(gray):
+    h, w = gray.shape
+    m = np.zeros((h, w), dtype=np.uint8)
+    m[int(h*BOARD_TOP):int(h*BOARD_BOT), :] = 255
+    return m
+
+
+def match_affine(img_src, img_dst, label=""):
+    """Returns 3x3 H such that img_src pixels → img_dst coordinates."""
+    sift = cv2.SIFT_create(nfeatures=5000)
+    g_dst = cv2.cvtColor(img_dst, cv2.COLOR_BGR2GRAY)
+    g_src = cv2.cvtColor(img_src, cv2.COLOR_BGR2GRAY)
+    kp1, des1 = sift.detectAndCompute(g_dst, board_mask(g_dst))
+    kp2, des2 = sift.detectAndCompute(g_src, board_mask(g_src))
+    if des1 is None or des2 is None or len(kp1) < 8 or len(kp2) < 8:
+        print(f"  {label}: insufficient keypoints")
+        return None
+    flann = cv2.FlannBasedMatcher({'algorithm': 1, 'trees': 5}, {'checks': 100})
+    raw = flann.knnMatch(des1, des2, k=2)
+    good = [m for m, n in raw if m.distance < 0.75 * n.distance]
+    if len(good) < 8:
+        print(f"  {label}: not enough good matches ({len(good)})")
+        return None
+    dst_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+    src_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    M, inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC,
+                                              ransacReprojThreshold=4.0)
+    if M is None:
+        print(f"  {label}: estimateAffinePartial2D failed")
+        return None
+    n_in = int(inliers.sum()) if inliers is not None else 0
+    print(f"  {label}: {n_in} inliers  tx={M[0,2]:.1f}  ty={M[1,2]:.1f}")
+    return np.vstack([M, [0, 0, 1]]).astype(np.float64)
+
+
+def blend(canvas, wc, img, H, cw, ch):
+    warped = cv2.warpPerspective(img, H, (cw, ch))
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+    cv2.normalize(dist, dist, 0, 1.0, cv2.NORM_MINMAX)
+    w = dist[..., np.newaxis].astype(np.float32)
+    canvas += warped.astype(np.float32) * w
+    wc += w
+
+
+def crop(img):
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, th = cv2.threshold(g, 1, 255, cv2.THRESH_BINARY)
+    c = cv2.findNonZero(th)
+    if c is None: return img
+    x, y, w, h = cv2.boundingRect(c)
+    return img[max(0,y-15):y+h+15, max(0,x-15):x+w+15]
+
 
 def main():
-    image_files = sorted(glob.glob("src/Screenshot*.png"))
-    images = [cv2.imread(f) for f in image_files if cv2.imread(f) is not None]
+    print("Loading images...")
+    imgs = load_all()
 
-    sift = cv2.SIFT_create()
-    features = []
-    
-    for img in images:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape
-        mask = np.zeros_like(gray)
-        # SIFT mask to find faceoff circles
-        mask[int(h*0.1):int(h*0.95), :] = 255 
-        kp, des = sift.detectAndCompute(gray, mask)
-        features.append((kp, des))
+    # imgs order by filename sort = [0]=10.08.20, [1]=10.08.46, [2]=10.08.49, [3]=10.36.10, [4]=10.36.20, [5]=10.36.27
+    # Spatial left→right:
+    spatial = [
+        imgs[4],   # 10.36.20 = LEFT END (ANA net)
+        imgs[3],   # 10.36.10 = LEFT ZONE
+        imgs[5],   # 10.36.27 = LEFT-CENTER
+        imgs[2],   # 10.08.49 = CENTER
+        imgs[1],   # 10.08.46 = RIGHT-CENTER
+        imgs[0],   # 10.08.20 = RIGHT ZONE
+    ]
 
-    flann = cv2.FlannBasedMatcher(dict(algorithm=1, trees=5), dict(checks=50))
-    center_idx = 2 # 10.08.49 PM
-    h, w = images[center_idx].shape[:2]
-    canvas_w = int(w * 4)
-    canvas_h = int(h * 3)
-    offset_x = int(w * 1.5)
-    offset_y = h
-    
-    H_base = np.array([[1, 0, offset_x], [0, 1, offset_y], [0, 0, 1]], dtype=np.float32)
+    h, w = spatial[0][1].shape[:2]
+    cw = w * 7
+    ch = int(h * 2.0)
+    # Place leftmost image at left with some padding
+    offset_x = 50
+    offset_y = int(h * 0.3)
 
-    def get_homography(idx_src, idx_dst):
-        kp1, des1 = features[idx_src]
-        kp2, des2 = features[idx_dst]
-        
-        matches = flann.knnMatch(des1, des2, k=2)
-        good_matches = []
-        for m, n in matches:
-            if m.distance < 0.8 * n.distance:
-                good_matches.append(m)
-                
-        if len(good_matches) < 10: return None
-        
-        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        
-        M, inliers = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 4.0)
-        return M
+    H_anchors = [None] * len(spatial)
+    H_anchors[0] = np.array([[1,0,offset_x],[0,1,offset_y],[0,0,1]], dtype=np.float64)
 
-    warped_imgs = []
-    
-    # Warped center
-    warped_img_c = cv2.warpPerspective(images[center_idx], H_base, (canvas_w, canvas_h))
-    warped_imgs.append(warped_img_c)
-    
-    for i in range(3):
-        if i == center_idx: continue
-        M = get_homography(i, center_idx)
+    print("\nChaining transforms left→right...")
+    for i in range(1, len(spatial)):
+        label, img_cur = spatial[i]
+        _, img_prev = spatial[i-1]
+        lname = f"{label.split('at ')[1].strip()} → {spatial[i-1][0].split('at ')[1].strip()}"
+        M = match_affine(img_cur, img_prev, lname)
         if M is not None:
-            H = np.matmul(H_base, M)
-            w_img = cv2.warpPerspective(images[i], H, (canvas_w, canvas_h))
-            warped_imgs.append(w_img)
+            H_anchors[i] = H_anchors[i-1] @ M
+        else:
+            print(f"  WARNING: Could not chain image {i}, trying direct match to anchor 0")
+            M2 = match_affine(img_cur, spatial[0][1], f"img{i}→anchor0")
+            if M2 is not None:
+                H_anchors[i] = H_anchors[0] @ M2
+            else:
+                print(f"  SKIPPING image {i}")
 
-    # Multi-band blending / Distance-based blending
-    accumulator = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
-    weight_sum = np.zeros((canvas_h, canvas_w, 1), dtype=np.float32)
-    
-    for w_img in warped_imgs:
-        # Create a binary mask
-        gray = cv2.cvtColor(w_img, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-        
-        # Distance transform to find distance from edge
-        dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
-        
-        # Normalize distance to 0-1 range to use as a weight
-        cv2.normalize(dist, dist, 0, 1.0, cv2.NORM_MINMAX)
-        dist_weight = dist[..., np.newaxis]
-        
-        accumulator += w_img.astype(np.float32) * dist_weight
-        weight_sum += dist_weight
-        
-    # Prevent division by zero
-    weight_sum[weight_sum == 0] = 1.0
-    
-    result = accumulator / weight_sum
-    result = result.astype(np.uint8)
+    print("\nBlending onto canvas...")
+    canvas = np.zeros((ch, cw, 3), dtype=np.float32)
+    wc = np.zeros((ch, cw, 1), dtype=np.float32)
 
-    # Crop to content
-    gray_res = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray_res, 1, 255, cv2.THRESH_BINARY)
-    coords = cv2.findNonZero(thresh)
-    if coords is not None:
-        x, y, crop_w, crop_h = cv2.boundingRect(coords)
-        result = result[y:y+crop_h, x:x+crop_w]
+    for i, (fname, img) in enumerate(spatial):
+        if H_anchors[i] is not None:
+            blend(canvas, wc, img, H_anchors[i], cw, ch)
+            print(f"  Blended [{i}] {fname.split('at ')[1].strip()}")
+        else:
+            print(f"  Skipped [{i}] {fname.split('at ')[1].strip()}")
 
-    output_path = "/Users/leesander/.gemini/antigravity/brain/d5aae78c-4b02-47aa-b503-4927926f04c0/artifacts/stitched_3_photos_final_homography.jpg"
-    cv2.imwrite(output_path, result)
-    print(f"Saved to {output_path}")
+    wc[wc == 0] = 1.0
+    result = (canvas / wc).astype(np.uint8)
+    result = crop(result)
+
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    cv2.imwrite(OUT, result, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    print(f"\nSaved → {OUT}  ({result.shape[1]}x{result.shape[0]})")
+
 
 if __name__ == "__main__":
     main()
