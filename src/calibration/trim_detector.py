@@ -22,16 +22,28 @@ Tuning constants at top of file — adjust per arena if the trim is a different 
 import cv2
 import numpy as np
 from scipy.ndimage import median_filter
+import json
+import os
 
 # ── Trim colour (yellow/gold kickplate) ───────────────────────────────────────
-# These HSV ranges target the golden-yellow board trim common in many NHL arenas.
-# If the arena uses a different color, adjust these.
-TRIM_H_LO = 15    # Hue lower bound (OpenCV: 0-180)
-TRIM_H_HI = 45    # Hue upper bound
-TRIM_S_LO = 80    # Saturation — must be somewhat saturated (not white)
+# Calibrated from manual annotations across 6 reference frames.
+# Two arena trim styles observed:
+#   - Yellow/gold kickplate (H≈15-45) — most common
+#   - Orange-red dasher bottom trim (H≈0-15, 165-180)
+# We use a wider hue range and rely on the ice-mask spatial constraint to avoid
+# false positives from the crowd or jerseys.
+TRIM_H_LO = 10    # Hue lower bound (OpenCV: 0-180)
+TRIM_H_HI = 50    # Hue upper bound — covers yellow through orange-gold
+TRIM_S_LO = 80    # Saturation — must be reasonably saturated
 TRIM_S_HI = 255
 TRIM_V_LO = 100   # Brightness — not too dark
 TRIM_V_HI = 255
+
+# Separate range for orange-red trim (VGK arena, etc.)
+TRIM_RED_LO1 = np.array([0,  100, 100])
+TRIM_RED_HI1 = np.array([10, 255, 255])
+TRIM_RED_LO2 = np.array([168, 100, 100])
+TRIM_RED_HI2 = np.array([180, 255, 255])
 
 # Minimum number of trim pixels per column for the column to be "valid"
 TRIM_MIN_PX_PER_COL = 3
@@ -39,8 +51,9 @@ TRIM_MIN_PX_PER_COL = 3
 # Board height in pixels at top vs bottom of frame (perspective foreshortening).
 # Physical boards are 42 inches tall. Near the top of the frame (far ice) they
 # appear shorter; near the bottom (near ice) they appear taller.
-BOARD_HEIGHT_TOP_PX    = 22
-BOARD_HEIGHT_BOTTOM_PX = 90
+# Values calibrated from manual annotations of 6 broadcast frames.
+BOARD_HEIGHT_TOP_PX    = 15   # far boards (y ~ 0)  — calibrated from annotations
+BOARD_HEIGHT_BOTTOM_PX = 190  # near boards (y ~ h) — calibrated from annotations
 
 # Fraction of frame height above which we never place the board top edge
 BOARD_MAX_TOP_FRAC = 0.08   # 8% — scorebug / stands ceiling
@@ -57,6 +70,7 @@ class TrimDetector:
         self._trim_y: np.ndarray | None = None   # per-column board-bottom y
         self._board_top_y: np.ndarray | None = None
         self._board_bot_y: np.ndarray | None = None
+        self._calibration_cache: tuple[float, float] | None = None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -76,12 +90,17 @@ class TrimDetector:
         h, w = frame.shape[:2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # ── 1. Colour gate ────────────────────────────────────────────────────
-        trim_raw = cv2.inRange(
+        # ── 1. Colour gate (yellow/gold + orange-red trim) ────────────────────
+        yel_mask = cv2.inRange(
             hsv,
             np.array([TRIM_H_LO, TRIM_S_LO, TRIM_V_LO], dtype=np.uint8),
             np.array([TRIM_H_HI, TRIM_S_HI, TRIM_V_HI], dtype=np.uint8),
         )
+        red_mask = cv2.bitwise_or(
+            cv2.inRange(hsv, TRIM_RED_LO1, TRIM_RED_HI1),
+            cv2.inRange(hsv, TRIM_RED_LO2, TRIM_RED_HI2),
+        )
+        trim_raw = cv2.bitwise_or(yel_mask, red_mask)
 
         # ── 2. Spatial mask: restrict to a band near the ice boundary ─────────
         if ice_mask is not None:
@@ -129,8 +148,10 @@ class TrimDetector:
 
         # ── 4. Project upward → board top ─────────────────────────────────────
         t_col   = trim_y_sm / h   # 0 = top of frame, 1 = bottom
-        board_h = (BOARD_HEIGHT_TOP_PX
-                   + t_col * (BOARD_HEIGHT_BOTTOM_PX - BOARD_HEIGHT_TOP_PX))
+
+        top_px, bottom_px = self._get_board_height_calibration()
+
+        board_h = (top_px + t_col * (bottom_px - top_px))
 
         raw_top = trim_y_sm - board_h
 
@@ -197,3 +218,27 @@ class TrimDetector:
         valid_v = arr[~nan_mask]
         arr[nan_mask] = np.interp(xs[nan_mask], valid_x, valid_v)
         return arr
+
+    def _get_board_height_calibration(self) -> tuple[float, float]:
+        """Load annotation-based board height calibration once, with sanity bounds."""
+        if self._calibration_cache is not None:
+            return self._calibration_cache
+
+        top_px = BOARD_HEIGHT_TOP_PX
+        bottom_px = BOARD_HEIGHT_BOTTOM_PX
+
+        ann_file = os.path.join(os.path.dirname(__file__), 'annotation_calibration.json')
+        if os.path.exists(ann_file):
+            try:
+                with open(ann_file, 'r') as f:
+                    ann = json.load(f)
+                top_px = float(ann.get('board_height_top_px', top_px))
+                bottom_px = float(ann.get('board_height_bottom_px', bottom_px))
+            except Exception:
+                top_px = BOARD_HEIGHT_TOP_PX
+                bottom_px = BOARD_HEIGHT_BOTTOM_PX
+
+        top_px = float(np.clip(top_px, 20.0, 120.0))
+        bottom_px = float(np.clip(bottom_px, top_px + 10.0, 160.0))
+        self._calibration_cache = (top_px, bottom_px)
+        return self._calibration_cache

@@ -1,0 +1,10 @@
+{
+  "board_height_top_px": 5,
+  "board_height_bottom_px": 190,
+  "board_face_s_max": 88,
+  "board_face_v_min": 51,
+  "trim_h_lo": 8,
+  "trim_h_hi": 106,
+  "trim_s_lo": 0,
+  "trim_v_lo": 112
+}
