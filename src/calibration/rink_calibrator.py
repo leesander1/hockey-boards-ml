@@ -14,11 +14,17 @@ Algorithm
 5. Morphological cleanup for smooth final edges.
 """
 
+import os
+
 import cv2
 import numpy as np
 from scipy.ndimage import median_filter
 
 from src.calibration.trim_detector import TrimDetector
+from src.calibration.annotation_board_detector import AnnotationBoardDetector
+from src.calibration.ml_board_detector import MLBoardDetector
+from src.calibration.example_based_board_detector import ExampleBasedBoardDetector
+from src.calibration.rink_feature_detector import RinkFeatureDetector
 
 # ── Tuning constants ──────────────────────────────────────────────────────────
 # Board height in pixels at top (far boards) and bottom (near boards) of frame.
@@ -37,7 +43,13 @@ class RinkCalibrator:
     def __init__(self):
         self._ice_hull = None    # convex hull of ice contour (pts, shape=(N,1,2))
         self._ice_mask = None    # filled ice mask (uint8)
-        self._trim_detector = TrimDetector()   # primary board finder
+        self._feature_prior = None  # optional external board prior (float mask)
+        self._trim_detector = TrimDetector()   # board finder via yellow trim
+        self._annotation_detector = AnnotationBoardDetector()  # board finder via annotation lines
+        self._ml_detector = MLBoardDetector()   # board finder via segmentation model
+        self._feature_detector = RinkFeatureDetector()  # auxiliary blue-line / circle support
+        self._use_example_transfer = os.environ.get('ENABLE_EXAMPLE_TRANSFER', '0') == '1'
+        self._example_detector = ExampleBasedBoardDetector() if self._use_example_transfer else None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -55,6 +67,10 @@ class RinkCalibrator:
         if result is not None:
             self._ice_mask, self._ice_hull = result
 
+    def set_feature_prior(self, prior_mask: np.ndarray | None):
+        """Set an externally computed board prior mask for ML refinement."""
+        self._feature_prior = prior_mask
+
     def get_board_mask(self, frame: np.ndarray) -> np.ndarray | None:
         """
         Returns a refined binary board mask (uint8, 255 = board ad zone).
@@ -69,13 +85,28 @@ class RinkCalibrator:
 
         h, w = frame.shape[:2]
 
+        # ── Highest priority: annotation lines (red top, yellow bottom) ───────
+        if self._annotation_detector.detect(frame):
+            mask = self._annotation_detector.get_board_mask()
+            if mask is not None:
+                return mask
+
+        # ── Optional non-ML path: feature-matched template transfer ───────────
+        if self._use_example_transfer and self._example_detector is not None:
+            if self._example_detector.detect(frame):
+                mask = self._example_detector.get_board_mask()
+                if mask is not None:
+                    return self._constrain_to_ice_edge(mask)
+
         # ── Primary: trim-based detection ────────────────────────────────────
         if self._trim_detector.detect(frame, ice_mask=self._ice_mask):
             mask = self._trim_detector.get_board_mask(frame)
             if mask is not None:
                 # Exclude scorebug zone
                 mask[:int(h * 0.20), :int(w * 0.27)] = 0
-                return mask
+                refined = self._refine_with_ml(frame, mask)
+                candidate = refined if refined is not None else mask
+                return self._constrain_to_ice_edge(candidate)
 
         # ── Fallback: ice-boundary projection (original approach) ─────────────
 
@@ -188,11 +219,158 @@ class RinkCalibrator:
         row_idx = np.arange(h, dtype=np.int32)[:, None]
         above   = row_idx < top_smooth[None, :]
         board_mask[above] = 0
-
-        return board_mask
+        refined = self._refine_with_ml(frame, board_mask)
+        candidate = refined if refined is not None else board_mask
+        return self._constrain_to_ice_edge(candidate)
 
     def is_calibrated(self) -> bool:
         return self._ice_mask is not None
+
+    def has_example_templates(self) -> bool:
+        """Returns True when example-based template detector has templates loaded."""
+        if self._example_detector is None:
+            return False
+        return len(getattr(self._example_detector, '_templates', [])) > 0
+
+    def _refine_with_ml(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+        """Use the ML mask to tighten the top edge of a geometry mask."""
+        if not self._ml_detector.is_ready():
+            return None
+
+        if not self._ml_detector.detect(frame, feature_prior=self._feature_prior):
+            return None
+
+        ml_mask = self._ml_detector.get_board_mask()
+        if ml_mask is None:
+            return None
+
+        confidence = self._ml_detector.get_confidence_score()
+        if confidence < 0.28:
+            return None
+
+        h, w = mask.shape[:2]
+        ml_binary = (ml_mask > 0).astype(np.uint8) * 255
+        ml_binary = cv2.morphologyEx(
+            ml_binary,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)),
+        )
+        ml_binary = cv2.morphologyEx(
+            ml_binary,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3)),
+        )
+
+        top_y = np.full(w, np.nan, dtype=np.float32)
+        col_strength = np.zeros(w, dtype=np.int32)
+        left_x = None
+        right_x = None
+        for col in range(w):
+            ys = np.where(ml_binary[:, col] > 0)[0]
+            if ys.size:
+                top_y[col] = float(ys.min())
+                col_strength[col] = int(ys.size)
+                if left_x is None:
+                    left_x = col
+                right_x = col
+
+        valid = ~np.isnan(top_y)
+        if valid.sum() < max(20, w // 20):
+            return None
+
+        valid_x = np.where(valid)[0]
+        top_y[~valid] = np.interp(np.where(~valid)[0], valid_x, top_y[valid])
+        top_y = median_filter(top_y, size=max(11, w // 20) | 1)
+        top_y = np.clip(top_y - 12, 0, h - 1).astype(np.int32)
+
+        # Do not allow ML to trim far below the geometry-derived top edge.
+        geom_top = np.full(w, h - 1, dtype=np.int32)
+        for col in range(w):
+            ys = np.where(mask[:, col] > 0)[0]
+            if ys.size:
+                geom_top[col] = int(ys.min())
+
+        strong_cols = (col_strength >= 6).astype(np.uint8)[None, :]
+        strong_cols = cv2.dilate(
+            strong_cols,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1)),
+        ).astype(bool).reshape(-1)
+
+        top_y = np.minimum(top_y, geom_top + 14)
+        top_y[~strong_cols] = geom_top[~strong_cols]
+
+        left_x = max(0, int(left_x) - 18)
+        right_x = min(w - 1, int(right_x) + 18)
+
+        row_idx = np.arange(h, dtype=np.int32)[:, None]
+        col_idx = np.arange(w, dtype=np.int32)[None, :]
+        refined = (mask > 0) & (row_idx >= top_y[None, :]) & (col_idx >= left_x) & (col_idx <= right_x)
+
+        base_cov = float((mask > 0).mean())
+        refined_cov = float(refined.mean())
+
+        # Keep the original mask unless ML only makes a small, high-confidence adjustment.
+        if refined_cov < 0.90 * base_cov:
+            return None
+        if refined_cov > 1.05 * base_cov:
+            return None
+
+        refined_mask = refined.astype(np.uint8) * 255
+        refined_mask[:int(h * 0.20), :int(w * 0.27)] = 0
+        return refined_mask
+
+    def _constrain_to_ice_edge(self, mask: np.ndarray) -> np.ndarray:
+        """Clamp mask to a plausible band around the per-column ice boundary."""
+        if self._ice_mask is None:
+            return mask
+
+        h, w = mask.shape[:2]
+        ice = self._ice_mask > 0
+        col_has_ice = ice.any(axis=0)
+        if not col_has_ice.any():
+            return mask
+
+        ice_top = np.full(w, np.nan, dtype=np.float32)
+        ice_top[col_has_ice] = np.argmax(ice[:, col_has_ice], axis=0).astype(np.float32)
+
+        valid_x = np.where(col_has_ice)[0]
+        missing_x = np.where(~col_has_ice)[0]
+        if missing_x.size:
+            ice_top[missing_x] = np.interp(missing_x, valid_x, ice_top[col_has_ice])
+
+        ice_top = median_filter(ice_top, size=max(11, w // 20) | 1).astype(np.int32)
+
+        row_idx = np.arange(h, dtype=np.int32)[:, None]
+        allowed = (
+            (row_idx >= (ice_top - 170)[None, :])
+            & (row_idx <= (ice_top + 10)[None, :])
+        )
+
+        constrained = np.where(allowed, mask, 0).astype(np.uint8)
+
+        # Drop very thin trailing tails near frame edges while keeping the main span.
+        binary = constrained > 0
+        heights = np.zeros(w, dtype=np.int32)
+        for col in range(w):
+            ys = np.where(binary[:, col])[0]
+            if ys.size:
+                heights[col] = int(ys.max() - ys.min() + 1)
+
+        nz = heights[heights > 0]
+        if nz.size:
+            min_sig_h = max(12, int(np.percentile(nz, 60) * 0.35))
+            sig_cols = np.where(heights >= min_sig_h)[0]
+            if sig_cols.size:
+                keep_lo = max(0, int(sig_cols.min()) - 40)
+                keep_hi = min(w - 1, int(sig_cols.max()) + 40)
+                constrained[:, :keep_lo] = 0
+                constrained[:, keep_hi + 1:] = 0
+
+        # Keep original if constraint is unexpectedly too aggressive.
+        if (constrained > 0).mean() < 0.55 * (mask > 0).mean():
+            return mask
+
+        return constrained
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -208,6 +386,14 @@ class RinkCalibrator:
         ice_raw = cv2.inRange(hsv,
                               np.array([0,   0, 175]),
                               np.array([180, 50, 255]))
+
+        # Use rink features to reinforce the ice mask where blue markings or
+        # large circles interrupt the bright-white surface.
+        support = None
+        if self._feature_detector.detect(frame):
+            support = self._feature_detector.get_feature_mask()
+        if support is not None:
+            ice_raw = cv2.bitwise_or(ice_raw, support)
 
         # Morphological clean-up to join nearby regions and fill small holes
         k = np.ones((ICE_MORPH_K, ICE_MORPH_K), np.uint8)

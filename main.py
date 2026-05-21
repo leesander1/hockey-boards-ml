@@ -14,6 +14,9 @@ def main():
     parser.add_argument("--output", type=str, help="Output destination (local file)")
     parser.add_argument("--stream", type=str, help="Output RTMP stream destination")
     parser.add_argument("--mock-inference", action="store_true", help="Run with mock inference for testing plumbing")
+    parser.add_argument("--hockeyai-model", type=str, help="Optional HockeyAI detector weights path")
+    parser.add_argument("--hockeyrink-model", type=str, help="Optional HockeyRink pose model weights path")
+    parser.add_argument("--hockeyrink-keypoint-map", type=str, help="JSON file mapping HockeyRink keypoint indices to world coordinates")
     parser.add_argument("--max-frames", type=int, default=0, help="Maximum number of frames to process")
     
     args = parser.parse_args()
@@ -25,7 +28,11 @@ def main():
     
     # 2. Initialize Inference Models
     print("Loading models (Board Segmentation, Player Instance Segmentation)...")
-    runner = ModelRunner()
+    runner = ModelRunner(
+        hockeyai_model_path=args.hockeyai_model,
+        hockeyrink_model_path=args.hockeyrink_model,
+        hockeyrink_keypoint_map_path=args.hockeyrink_keypoint_map,
+    )
     if args.mock_inference:
         runner.mock = True
         
