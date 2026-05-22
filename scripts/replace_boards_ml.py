@@ -69,7 +69,7 @@ def main():
     print(f"Model Path    : {args.model}")
     print(f"Blend Alpha   : {args.blend-alpha if hasattr(args, 'blend-alpha') else args.blend_alpha:.2f}")
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"Running on device: {device}")
     
     # 1. Load ML Board Detector (our trained UNet or DeepLabV3)

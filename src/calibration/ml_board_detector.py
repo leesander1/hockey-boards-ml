@@ -119,7 +119,7 @@ class MLBoardDetector:
 
     def __init__(self, model_path: str | None = None):
         self._model = None
-        self._device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self._device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
         self._board_mask = None
         self._prob_map = None
         self._confidence_score = 0.0

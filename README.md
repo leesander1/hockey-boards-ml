@@ -63,11 +63,45 @@ python validate_model.py
 
 This will run the updated model against random frames in `annotation_frames/new_batch/` and output visual side-by-side comparisons (including probability heatmaps and final masked overlays) into `test_images/validation_output/`.
 
-### Running the Pipeline
-To run the ad-blocker pipeline on a local video file:
+### Hardware Acceleration & Real-Time Performance
+
+The pipeline is fully optimized for hardware-accelerated real-time inference (30+ FPS) on modern GPUs:
+* **Apple Silicon (macOS)**: Native **MPS (Metal Performance Shaders)** GPU acceleration is automatically detected and used.
+* **NVIDIA GPU (CUDA)**: CUDA is automatically used if available.
+* **Fallback**: Gracefully falls back to optimized CPU execution.
+
+---
+
+### Real-Time Interactive Demo (Live Playback)
+
+We provide a real-time, interactive ad-blocking playback script that runs the board segmenter and player occlusion models in real-time, displaying the results live on your screen with a sleek performance HUD:
+
 ```bash
-python main.py --source data/videos/input.mp4 --ad data/replacement_ad.jpg --output data/output.mp4
+# Run with a video file (using Apple Silicon GPU acceleration by default)
+python scripts/realtime_ad_blocker.py --source data/videos/2026-05-12_21-15-46.mp4
+
+# Run with a live webcam or capture card (device index 0)
+python scripts/realtime_ad_blocker.py --source 0
 ```
+
+**Interactive Controls (during live playback):**
+* Press **`s`** to instantly **toggle** the digital ad-blocker ON and OFF (great for testing/QA comparison!).
+* Press **`q`** to safely quit the playback window.
+
+---
+
+### Batch Processing Video Pipeline
+
+To process a video file and save the output directly to disk:
+
+```bash
+python scripts/replace_boards_ml.py --video data/videos/input.mp4 --ad test_images/neutral_board.png --output output/ml_composited.mp4
+```
+
+* **`--video`**: Path to local source video.
+* **`--ad`**: Path to replacement board texture (e.g. clean white board).
+* **`--blend-alpha`**: Strength of replacement texture overlay (default: `0.70`).
+* **`--model`**: Path to trained board segmentation weights file.
 
 To optionally bias the board mask with external rink features, pass a HockeyAI detector and/or a HockeyRink pose model:
 ```bash
