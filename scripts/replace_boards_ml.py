@@ -23,8 +23,8 @@ def main():
     parser = argparse.ArgumentParser(description="Replace boards in a video using the trained ML model")
     parser.add_argument("--video", type=str, default="data/videos/2026-05-12 21-15-46.mp4", 
                         help="Path to source video")
-    parser.add_argument("--ad", type=str, default="test_images/premium_ad.png", 
-                        help="Path to replacement advertisement banner")
+    parser.add_argument("--ad", type=str, default="test_images/neutral_board.png", 
+                        help="Path to neutral replacement board texture")
     parser.add_argument("--output", type=str, default="output/ml_composited.mp4", 
                         help="Path to save the output video")
     parser.add_argument("--max-frames", type=int, default=150, 
