@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import os
 import json
@@ -19,30 +20,39 @@ from glob import glob
 
 ANN_DIR = os.path.join(os.path.dirname(__file__), '..', 'annotation_frames')
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'src', 'calibration', 'board_segmentation_model.pth')
-TARGET_WIDTH = 640
-TARGET_HEIGHT = 360
-SCALE_VARIANTS = (
-    (1.00, 1.00),
-    (1.08, 1.00),
-    (0.92, 1.00),
-    (1.00, 0.92),
-)
+TARGET_WIDTH = 320
+TARGET_HEIGHT = 176
 
 
 class BoardAnnotationDataset(Dataset):
-    """Dataset that loads source frames and derives masks from matching annotations."""
+    """Dataset that preloads and caches source frames and pre-straightened masks in RAM to avoid slow disk I/O."""
 
     def __init__(self, annotation_dir):
         self.samples = []
 
-        # Primary training set: source JPGs with matching annotation PNGs.
-        for image_path in sorted(glob(os.path.join(annotation_dir, '*.jpg'))):
-            stem = os.path.splitext(os.path.basename(image_path))[0]
-            annotation_path = os.path.join(annotation_dir, f'{stem}.png')
-            if os.path.exists(annotation_path):
-                self.samples.append((image_path, annotation_path))
+        # Recursively find annotated PNGs and map to matching JPGs and straightened masks
+        annotated_paths = sorted(
+            glob(os.path.join(annotation_dir, '**', '*-annotated.png'), recursive=True) +
+            glob(os.path.join(annotation_dir, '**', '*-annotate.png'), recursive=True)
+        )
 
-        self.variant_count = len(SCALE_VARIANTS) + 1
+        print("Preloading and caching all images and masks in RAM...", flush=True)
+        for ann_path in annotated_paths:
+            stem = os.path.basename(ann_path).replace('-annotated.png', '').replace('-annotate.png', '')
+            image_path = os.path.join(os.path.dirname(ann_path), f"{stem}.jpg")
+            mask_path = os.path.join(os.path.dirname(ann_path), f"{stem}-mask.png")
+            if os.path.exists(image_path) and os.path.exists(mask_path):
+                img = cv2.imread(image_path)
+                mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if img is not None and mask is not None:
+                    # Convert to RGB (from BGR)
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    self.samples.append((img, mask))
+                else:
+                    print(f"Warning: Failed to load {image_path} or {mask_path}", flush=True)
+
+        self.variant_count = 2
+        print(f"Finished caching {len(self.samples)} original pairs into RAM. Total training size: {len(self.samples) * self.variant_count}", flush=True)
 
     def __len__(self):
         return len(self.samples) * self.variant_count
@@ -50,71 +60,19 @@ class BoardAnnotationDataset(Dataset):
     def __getitem__(self, idx):
         sample_idx = idx // self.variant_count
         variant_idx = idx % self.variant_count
-        image_path, annotation_path = self.samples[sample_idx]
+        orig_img, orig_mask = self.samples[sample_idx]
 
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError(f'failed to load {image_path}')
+        # Copy arrays so we don't mutate the cached originals
+        img = orig_img.copy()
+        mask = orig_mask.copy()
+        
+        # Apply flip augmentation
+        if variant_idx == 1:
+            # Flip image and mask horizontally
+            img = cv2.flip(img, 1)
+            mask = cv2.flip(mask, 1)
 
-        # Convert to RGB (from BGR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        if variant_idx > 0:
-            img, annotation = self._augment_pair(img, annotation_path, variant_idx)
-        else:
-            annotation = cv2.imread(annotation_path)
-            if annotation is None:
-                raise ValueError(f'failed to load {annotation_path}')
-
-        annotation = cv2.cvtColor(annotation, cv2.COLOR_BGR2HSV)
-        # Extract ground-truth mask from the matching annotation overlay.
-        hsv = annotation
-
-        h, w = img.shape[:2]
-
-        # Red (top)
-        red = cv2.inRange(hsv, np.array([0, 150, 150], np.uint8), np.array([10, 255, 255], np.uint8))
-        red = cv2.bitwise_or(red, cv2.inRange(hsv, np.array([170, 150, 150], np.uint8), np.array([180, 255, 255], np.uint8)))
-        red = cv2.morphologyEx(red, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (31, 3)))
-
-        # Yellow (bottom)
-        yellow = cv2.inRange(hsv, np.array([18, 150, 150], np.uint8), np.array([35, 255, 255], np.uint8))
-        yellow = cv2.morphologyEx(yellow, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (31, 3)))
-
-        # Per-column extremes
-        red_top_y = np.full(w, np.nan, dtype=np.float32)
-        yellow_bot_y = np.full(w, np.nan, dtype=np.float32)
-
-        for col in range(w):
-            r_ys = np.where(red[:, col] > 0)[0]
-            y_ys = np.where(yellow[:, col] > 0)[0]
-            if r_ys.size:
-                red_top_y[col] = float(r_ys.min())
-            if y_ys.size:
-                yellow_bot_y[col] = float(y_ys.max())
-
-        # Interpolate NaNs
-        valid = ~np.isnan(red_top_y)
-        if valid.sum() > 0:
-            valid_x = np.where(valid)[0]
-            red_top_y[~valid] = np.interp(np.arange(w)[~valid], valid_x, red_top_y[valid])
-
-        valid = ~np.isnan(yellow_bot_y)
-        if valid.sum() > 0:
-            valid_x = np.where(valid)[0]
-            yellow_bot_y[~valid] = np.interp(np.arange(w)[~valid], valid_x, yellow_bot_y[valid])
-
-        # Build mask.
-        mask = np.zeros((h, w), dtype=np.uint8)
-        row_idx = np.arange(h, dtype=np.int32)[:, None]
-        red_top_y_int = np.clip(red_top_y, 0, h - 1).astype(np.int32)
-        yellow_bot_y_int = np.clip(yellow_bot_y, 0, h - 1).astype(np.int32)
-        in_board = (row_idx >= red_top_y_int[None, :]) & (row_idx <= yellow_bot_y_int[None, :])
-        mask[in_board] = 255
-
-        # Exclude scorebug zone.
-        mask[:int(h * 0.25), :int(w * 0.35)] = 0
-
-        # Resize to a fixed training resolution to stabilize batching and learning.
+        # Resize to training resolution
         img = cv2.resize(img, (TARGET_WIDTH, TARGET_HEIGHT), interpolation=cv2.INTER_AREA)
         mask = cv2.resize(mask, (TARGET_WIDTH, TARGET_HEIGHT), interpolation=cv2.INTER_NEAREST)
 
@@ -126,25 +84,9 @@ class BoardAnnotationDataset(Dataset):
 
         return img_tensor, mask_tensor
 
-    def _augment_pair(self, img, annotation_path, variant_idx):
-        """Apply a deterministic image augmentation to a paired sample."""
-        annotation = cv2.imread(annotation_path)
-        if annotation is None:
-            raise ValueError(f'failed to load {annotation_path}')
-
-        if variant_idx == 1:
-            img = cv2.flip(img, 1)
-            annotation = cv2.flip(annotation, 1)
-        elif variant_idx == 2:
-            img = cv2.convertScaleAbs(img, alpha=1.08, beta=8)
-        elif variant_idx == 3:
-            img = cv2.convertScaleAbs(img, alpha=0.92, beta=-6)
-
-        return img, annotation
-
 
 class UNet(nn.Module):
-    """Lightweight U-Net for board segmentation."""
+    """Lightweight U-Net for board segmentation matching production exactly."""
 
     def __init__(self, in_channels=3, out_channels=1):
         super().__init__()
@@ -178,8 +120,10 @@ class UNet(nn.Module):
     def _conv_block(self, in_ch, out_ch):
         return nn.Sequential(
             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
 
@@ -193,22 +137,36 @@ class UNet(nn.Module):
         b = self.bottleneck(self.pool3(e3))
 
         # Decoder
-        d3 = self.dec3(torch.cat([self.upconv3(b), e3], dim=1))
-        d2 = self.dec2(torch.cat([self.upconv2(d3), e2], dim=1))
-        d1 = self.dec1(torch.cat([self.upconv1(d2), e1], dim=1))
+        up3 = self.upconv3(b)
+        if up3.shape != e3.shape:
+            up3 = F.interpolate(up3, size=e3.shape[2:], mode='bilinear', align_corners=False)
+        d3 = self.dec3(torch.cat([up3, e3], dim=1))
+
+        up2 = self.upconv2(d3)
+        if up2.shape != e2.shape:
+            up2 = F.interpolate(up2, size=e2.shape[2:], mode='bilinear', align_corners=False)
+        d2 = self.dec2(torch.cat([up2, e2], dim=1))
+
+        up1 = self.upconv1(d2)
+        if up1.shape != e1.shape:
+            up1 = F.interpolate(up1, size=e1.shape[2:], mode='bilinear', align_corners=False)
+        d1 = self.dec1(torch.cat([up1, e1], dim=1))
 
         return self.sigmoid(self.final(d1))
 
 
 def train():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
+    # Force CPU to avoid Apple Silicon MPS deadlocks and kernel bugs
+    device = torch.device('cpu')
+    print(f'Using device: {device}', flush=True)
+
+    # Maximize CPU usage
+    torch.set_num_threads(8)
+    print(f'Using {torch.get_num_threads()} CPU threads', flush=True)
 
     # Dataset and loader
     dataset = BoardAnnotationDataset(ANN_DIR)
-    loader = DataLoader(dataset, batch_size=2, shuffle=True)
-
-    print(f'Loaded {len(dataset)} paired annotation samples')
+    loader = DataLoader(dataset, batch_size=4, shuffle=True)
 
     # Model
     model = UNet(in_channels=3, out_channels=1).to(device)
@@ -216,7 +174,7 @@ def train():
     criterion = nn.BCELoss()
 
     # Training loop
-    epochs = 10
+    epochs = 4
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -236,18 +194,17 @@ def train():
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
-        if (epoch + 1) % 10 == 0:
-            print(f'Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.6f}')
+        print(f'Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.6f}', flush=True)
 
     # Save
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     torch.save(model.state_dict(), MODEL_PATH)
-    print(f'Saved model to {MODEL_PATH}')
+    print(f'Saved model to {MODEL_PATH}', flush=True)
 
     # Also save hyperparams
     config_path = MODEL_PATH.replace('.pth', '_config.json')
     with open(config_path, 'w') as f:
-        json.dump({'in_channels': 3, 'out_channels': 1, 'device': device.type}, f)
+        json.dump({'in_channels': 3, 'out_channels': 1, 'device': device.type, 'architecture': 'unet'}, f)
 
 
 if __name__ == '__main__':

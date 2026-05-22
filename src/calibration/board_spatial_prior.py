@@ -15,8 +15,8 @@ import cv2
 import numpy as np
 
 
-TARGET_WIDTH = 640
-TARGET_HEIGHT = 360
+TARGET_WIDTH = 320
+TARGET_HEIGHT = 176
 
 
 class BoardSpatialPrior:

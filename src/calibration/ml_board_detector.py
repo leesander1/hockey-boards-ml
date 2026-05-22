@@ -13,8 +13,8 @@ import torchvision.models.segmentation as segmentation
 
 from src.calibration.board_spatial_prior import BoardSpatialPrior
 
-TARGET_WIDTH = 640
-TARGET_HEIGHT = 360
+TARGET_WIDTH = 320
+TARGET_HEIGHT = 176
 BOARD_HEIGHT_TOP_PX = 15
 BOARD_HEIGHT_BOTTOM_PX = 190
 BOARD_MAX_TOP_FRAC = 0.08
