@@ -29,6 +29,8 @@ def main():
                         help="Path to save the output video")
     parser.add_argument("--max-frames", type=int, default=150, 
                         help="Maximum frames to process (default: 150 for a fast demo)")
+    parser.add_argument("--blend-alpha", type=float, default=0.70, 
+                        help="Blending alpha: 1.0 = fully opaque new texture, 0.0 = fully original (default: 0.70)")
     
     args = parser.parse_args()
     
@@ -58,6 +60,7 @@ def main():
     print(f"Source Video  : {args.video}")
     print(f"Replacement Ad: {args.ad}")
     print(f"Output Video  : {args.output}")
+    print(f"Blend Alpha   : {args.blend-alpha if hasattr(args, 'blend-alpha') else args.blend_alpha:.2f}")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Running on device: {device}")
@@ -125,7 +128,7 @@ def main():
             player_mask = runner.get_player_mask(frame)
             
             # C. Blend ad behind players inside board area
-            composited = compositor.apply_ad(frame, board_mask, player_mask)
+            composited = compositor.apply_ad(frame, board_mask, player_mask, blend_alpha=args.blend_alpha)
             
             # D. Write to output
             out.write(composited)

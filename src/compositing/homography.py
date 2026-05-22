@@ -25,7 +25,8 @@ class AdCompositor:
     def apply_ad(self,
                  frame: np.ndarray,
                  board_mask: np.ndarray,
-                 player_mask: np.ndarray) -> np.ndarray:
+                 player_mask: np.ndarray,
+                 blend_alpha: float = 0.70) -> np.ndarray:
         """
         Composite the replacement ad onto `frame` inside `board_mask`,
         but *behind* any players indicated by `player_mask`.
@@ -35,6 +36,7 @@ class AdCompositor:
         frame       : BGR image from the video stream
         board_mask  : uint8 binary mask — 255 where boards are
         player_mask : uint8 binary mask — 255 where players are
+        blend_alpha : float — blending opacity for the new ad/board texture (0.0 to 1.0)
 
         Returns
         -------
@@ -53,7 +55,10 @@ class AdCompositor:
 
         mask3 = cv2.merge([insertion_mask] * 3)
 
-        foreground = cv2.bitwise_and(ad_layer, mask3)
+        # Blend the ad/neutral texture with the original frame's lighting and background
+        blended_layer = cv2.addWeighted(ad_layer, blend_alpha, frame, 1.0 - blend_alpha, 0)
+
+        foreground = cv2.bitwise_and(blended_layer, mask3)
         background = cv2.bitwise_and(frame,    cv2.bitwise_not(mask3))
         return cv2.add(foreground, background)
 
