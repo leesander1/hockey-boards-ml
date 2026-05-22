@@ -69,6 +69,39 @@ class AdCompositor:
         # 3. Blend the crisp neutral texture with the processed ambient lighting layer.
         blended_layer = cv2.addWeighted(ad_layer, blend_alpha, ambient_light, 1.0 - blend_alpha, 0)
 
+        # 4. Add Top Red Line and Bottom Yellow Line to the ad layer
+        # Calculate thickness based on frame height (approx 1.5%)
+        thickness = max(2, int(h * 0.015))
+        
+        # Find top edge by shifting the mask down
+        shifted_down = np.zeros_like(board_mask)
+        shifted_down[thickness:, :] = board_mask[:-thickness, :]
+        top_edge = cv2.bitwise_and(board_mask, cv2.bitwise_not(shifted_down))
+        
+        # Find bottom edge by shifting the mask up
+        shifted_up = np.zeros_like(board_mask)
+        shifted_up[:-thickness, :] = board_mask[thickness:, :]
+        bottom_edge = cv2.bitwise_and(board_mask, cv2.bitwise_not(shifted_up))
+        
+        # Define colors (BGR)
+        red_color = (30, 30, 200)      # Darker red for the top dasher board
+        yellow_color = (0, 200, 220)   # Yellow for the bottom kickplate
+        
+        # Create an overlay for the lines
+        edge_overlay = np.zeros_like(blended_layer)
+        edge_overlay[top_edge > 0] = red_color
+        edge_overlay[bottom_edge > 0] = yellow_color
+        
+        # Create an edge mask for blending
+        edge_mask = cv2.bitwise_or(top_edge, bottom_edge)
+        # Blur the edge mask slightly to anti-alias and make it look smooth
+        edge_mask_blurred = cv2.GaussianBlur(edge_mask, (5, 5), 0)
+        
+        # Blend the lines into the blended_layer
+        edge_mask_norm = edge_mask_blurred.astype(np.float32) / 255.0
+        edge_mask_norm = np.expand_dims(edge_mask_norm, axis=-1)
+        blended_layer = (edge_overlay * edge_mask_norm + blended_layer * (1.0 - edge_mask_norm)).astype(np.uint8)
+
         foreground = cv2.bitwise_and(blended_layer, mask3)
         background = cv2.bitwise_and(frame,    cv2.bitwise_not(mask3))
         return cv2.add(foreground, background)

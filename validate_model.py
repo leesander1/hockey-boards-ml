@@ -30,14 +30,9 @@ def main():
         name = "custom"
         if "unet" in args.model.lower():
             name = "unet"
-        elif "deeplabv3" in args.model.lower() or "board_segmentation_model.pth" in args.model:
-            name = "deeplabv3"
         models_to_test[name] = args.model
     else:
-        deeplab_path = os.path.join('src', 'calibration', 'board_segmentation_model.pth')
-        unet_path = os.path.join('src', 'calibration', 'board_segmentation_model_unet.pth')
-        if os.path.exists(deeplab_path):
-            models_to_test['deeplabv3'] = deeplab_path
+        unet_path = os.path.join('src', 'calibration', 'board_segmentation_model.pth')
         if os.path.exists(unet_path):
             models_to_test['unet'] = unet_path
             

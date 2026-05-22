@@ -72,7 +72,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"Running on device: {device}")
     
-    # 1. Load ML Board Detector (our trained UNet or DeepLabV3)
+    # 1. Load ML Board Detector (our trained UNet)
     print("Loading ML Board Detector...")
     board_detector = MLBoardDetector(model_path=args.model)
     if not board_detector.is_ready():

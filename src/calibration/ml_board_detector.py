@@ -90,30 +90,6 @@ class UNet(nn.Module):
         return self.sigmoid(self.final(d1))
 
 
-def get_deeplabv3_model(pretrained=True, num_classes=1, aux_loss=True):
-    """Constructs a DeepLabV3 model with a MobileNetV3-Large backbone adapted for binary mask."""
-    if pretrained:
-        try:
-            from torchvision.models.segmentation import DeepLabV3_MobileNet_V3_Large_Weights
-            weights = DeepLabV3_MobileNet_V3_Large_Weights.DEFAULT
-            model = segmentation.deeplabv3_mobilenet_v3_large(weights=weights, aux_loss=aux_loss)
-        except Exception:
-            model = segmentation.deeplabv3_mobilenet_v3_large(pretrained=True, aux_loss=aux_loss)
-    else:
-        model = segmentation.deeplabv3_mobilenet_v3_large(weights=None, aux_loss=aux_loss)
-        
-    # Replace classifier head
-    in_channels = model.classifier[4].in_channels
-    model.classifier[4] = nn.Conv2d(in_channels, num_classes, kernel_size=1)
-    
-    # Replace aux classifier head if present
-    if aux_loss and model.aux_classifier is not None:
-        in_channels_aux = model.aux_classifier[4].in_channels
-        model.aux_classifier[4] = nn.Conv2d(in_channels_aux, num_classes, kernel_size=1)
-        
-    return model
-
-
 class MLBoardDetector:
     """Board detector using trained segmentation model."""
 
@@ -135,32 +111,11 @@ class MLBoardDetector:
     def _load_model(self, path: str):
         """Load trained model from disk."""
         try:
-            # Determine architecture from config if available
-            config_path = path.replace('.pth', '_config.json')
-            architecture = 'unet'
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, 'r') as f:
-                        cfg = json.load(f)
-                    architecture = cfg.get('architecture', 'unet')
-                except Exception as e:
-                    print(f'Warning: failed to read config {config_path}: {e}')
-
-            if architecture == 'deeplabv3':
-                # Attempt to load with aux_loss=True first (default from notebook)
-                try:
-                    self._model = get_deeplabv3_model(pretrained=False, num_classes=1, aux_loss=True).to(self._device)
-                    self._model.load_state_dict(torch.load(path, map_location=self._device))
-                except Exception as e:
-                    # If that fails (e.g. if saved without auxiliary classifier), try aux_loss=False
-                    self._model = get_deeplabv3_model(pretrained=False, num_classes=1, aux_loss=False).to(self._device)
-                    self._model.load_state_dict(torch.load(path, map_location=self._device))
-            else:
-                self._model = UNet(in_channels=3, out_channels=1).to(self._device)
-                self._model.load_state_dict(torch.load(path, map_location=self._device))
+            self._model = UNet(in_channels=3, out_channels=1).to(self._device)
+            self._model.load_state_dict(torch.load(path, map_location=self._device))
 
             self._model.eval()
-            print(f'Loaded {architecture} board segmentation model from {path}')
+            print(f'Loaded unet board segmentation model from {path}')
         except Exception as e:
             print(f'Warning: failed to load model from {path}: {e}')
 
@@ -185,11 +140,6 @@ class MLBoardDetector:
         # Predict
         with torch.no_grad():
             pred = self._model(img_tensor)
-
-        # Handle dict output from models like DeepLabV3
-        if isinstance(pred, dict):
-            pred_logits = pred['out']
-            pred = torch.sigmoid(pred_logits)
 
         # Convert to mask
         pred_np = pred.squeeze(0).squeeze(0).cpu().numpy()  # (H,W)
