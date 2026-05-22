@@ -47,10 +47,7 @@ for base in bases:
 
 MODEL_PATH = 'src/calibration/board_segmentation_model.pth'
 
-# Script paths for warp-to-template training
-WARP_SCRIPT = 'scripts/warp_to_template.py'
-TRAIN_WARPED_SCRIPT = 'scripts/train_board_segmentation_warped.py'
-WARPED_DATASET = 'src/data/warped_dataset.py'
+
 
 KEYPOINT_MAP_TEMPLATE_PATH = 'hockeyrink_keypoint_map.template.json'
 
@@ -128,9 +125,3 @@ print('  2. Runtime → Change runtime type → T4 GPU')
 print('  3. Run all cells — upload the zip when prompted')
 print('  4. Download board_segmentation_model.pth at the end')
 print('  5. Replace src/calibration/board_segmentation_model.pth in this repo')
-print('\nWorkflow 2: Warp-to-template training (better generalization)')
-print('  1. Upload the zip to Colab')
-print('  2. Run: python scripts/warp_to_template.py  (creates data/warped/train/)')
-print('  3. Run: python scripts/train_board_segmentation_warped.py --epochs 50')
-print('  4. Download models/board_segmentation_warped.pth')
-print('  5. (Optional) Fine-tune on original frames for last few epochs')

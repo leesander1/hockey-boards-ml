@@ -9,7 +9,6 @@ import os
 import json
 import torch.nn.functional as F
 from scipy.ndimage import median_filter
-import torchvision.models.segmentation as segmentation
 
 from src.calibration.board_spatial_prior import BoardSpatialPrior
 
@@ -95,7 +94,7 @@ class MLBoardDetector:
 
     def __init__(self, model_path: str | None = None):
         self._model = None
-        self._device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+        self._device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self._board_mask = None
         self._prob_map = None
         self._confidence_score = 0.0
@@ -103,7 +102,7 @@ class MLBoardDetector:
         self._feature_prior = None
 
         if model_path is None:
-            model_path = os.path.join(os.path.dirname(__file__), 'board_segmentation_model_unet.pth')
+            model_path = os.path.join(os.path.dirname(__file__), 'board_segmentation_model.pth')
 
         if os.path.exists(model_path):
             self._load_model(model_path)
@@ -113,9 +112,8 @@ class MLBoardDetector:
         try:
             self._model = UNet(in_channels=3, out_channels=1).to(self._device)
             self._model.load_state_dict(torch.load(path, map_location=self._device))
-
             self._model.eval()
-            print(f'Loaded unet board segmentation model from {path}')
+            print(f'Loaded board segmentation model from {path}')
         except Exception as e:
             print(f'Warning: failed to load model from {path}: {e}')
 
@@ -190,26 +188,20 @@ class MLBoardDetector:
             top_y[missing_x] = np.interp(missing_x, valid_x, top_y[valid])
             bot_y[missing_x] = np.interp(missing_x, valid_x, bot_y[valid])
 
-            # Apply robust median filtering first to strip out high-frequency noise and outlier spikes
-            top_y_med = median_filter(top_y, size=max(11, w // 18) | 1).astype(np.float32)
-            bot_y_med = median_filter(bot_y, size=max(7, w // 24) | 1).astype(np.float32)
+            top_y = median_filter(top_y, size=max(11, w // 18) | 1).astype(np.float32)
+            bot_y = median_filter(bot_y, size=max(7, w // 24) | 1).astype(np.float32)
 
-            # Fit 2nd-degree polynomial to the filtered bottom coordinate (perfectly smooth, parabolic curve fit)
-            x_coords = np.arange(w, dtype=np.float32)
-            coeffs_bot = np.polyfit(x_coords, bot_y_med, deg=2)
-            bot_y_smooth = np.polyval(coeffs_bot, x_coords).astype(np.float32)
-
-            # Project upward using the board height prior based on the smoothed bottom coordinate
-            t_col = np.clip(bot_y_smooth / float(h), 0.0, 1.0)
+            # Treat the detected pixels as the board's lower boundary and
+            # project upward using a known board-height prior. This is a much
+            # better fit than trusting the fragment thickness itself.
+            t_col = np.clip(bot_y / float(h), 0.0, 1.0)
             board_h = BOARD_HEIGHT_TOP_PX + t_col * (BOARD_HEIGHT_BOTTOM_PX - BOARD_HEIGHT_TOP_PX)
-            top_y_raw = np.clip(bot_y_smooth - board_h, h * BOARD_MAX_TOP_FRAC, h - 1)
+            top_y = np.clip(bot_y - board_h, h * BOARD_MAX_TOP_FRAC, h - 1)
 
-            # Fit 2nd-degree polynomial to the top coordinate to ensure top line is equally smooth and clean
-            coeffs_top = np.polyfit(x_coords, top_y_raw, deg=2)
-            top_y_smooth = np.polyval(coeffs_top, x_coords).astype(np.float32)
+            top_y = median_filter(top_y, size=max(9, w // 22) | 1).astype(np.float32)
 
-            top_y = np.clip(top_y_smooth, 0, h - 1).astype(np.int32)
-            bot_y = np.clip(bot_y_smooth, top_y + 1, h - 1).astype(np.int32)
+            top_y = np.clip(top_y, 0, h - 1).astype(np.int32)
+            bot_y = np.clip(bot_y, top_y + 1, h - 1).astype(np.int32)
 
             row_idx = np.arange(h, dtype=np.int32)[:, None]
             band = (row_idx >= top_y[None, :]) & (row_idx <= bot_y[None, :])
