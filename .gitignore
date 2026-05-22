@@ -1,0 +1,35 @@
+# Datasets and Large Artifacts
+annotation_frames/
+test_images/
+tmp_frames/
+data/
+
+# Videos
+*.mp4
+*.mov
+*.avi
+
+# PyTorch & Machine Learning Models
+*.pth
+*.pt
+*.onnx
+
+# Compressed Archives
+*.zip
+*.tar
+*.gz
+*.rar
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
