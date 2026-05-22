@@ -55,8 +55,19 @@ class AdCompositor:
 
         mask3 = cv2.merge([insertion_mask] * 3)
 
-        # Blend the ad/neutral texture with the original frame's lighting and background
-        blended_layer = cv2.addWeighted(ad_layer, blend_alpha, frame, 1.0 - blend_alpha, 0)
+        # 1. Blur the original frame strongly to smear out sharp text/logo edges from the original ads.
+        # This keeps the overall ambient lighting, gradients, and soft reflections without any readable text.
+        k_size = int(w * 0.06) | 1
+        blurred = cv2.GaussianBlur(frame, (k_size, k_size), 0)
+
+        # 2. Desaturate the blurred image to neutralize the original ad colors,
+        # while keeping the native color temperature/tint of the rink lighting (15% color, 85% gray).
+        gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+        gray_3ch = cv2.merge([gray, gray, gray])
+        ambient_light = cv2.addWeighted(blurred, 0.15, gray_3ch, 0.85, 0)
+
+        # 3. Blend the crisp neutral texture with the processed ambient lighting layer.
+        blended_layer = cv2.addWeighted(ad_layer, blend_alpha, ambient_light, 1.0 - blend_alpha, 0)
 
         foreground = cv2.bitwise_and(blended_layer, mask3)
         background = cv2.bitwise_and(frame,    cv2.bitwise_not(mask3))
