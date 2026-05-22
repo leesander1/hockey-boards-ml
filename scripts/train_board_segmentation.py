@@ -174,7 +174,7 @@ def train():
     criterion = nn.BCELoss()
 
     # Training loop
-    epochs = 4
+    epochs = 6
     for epoch in range(epochs):
         model.train()
         total_loss = 0
