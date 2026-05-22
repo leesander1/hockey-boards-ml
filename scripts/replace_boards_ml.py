@@ -31,6 +31,8 @@ def main():
                         help="Maximum frames to process (default: 150 for a fast demo)")
     parser.add_argument("--blend-alpha", type=float, default=0.70, 
                         help="Blending alpha: 1.0 = fully opaque new texture, 0.0 = fully original (default: 0.70)")
+    parser.add_argument("--model", type=str, default=os.path.join("src", "calibration", "board_segmentation_model.pth"),
+                        help="Path to trained model weights (.pth)")
     
     args = parser.parse_args()
     
@@ -53,6 +55,10 @@ def main():
         print(f"Warning: Ad banner not found at {args.ad}. Using green fallback.")
         args.ad = None
 
+    if not os.path.exists(args.model):
+        print(f"Error: Model file not found: {args.model}")
+        sys.exit(1)
+ 
     # Ensure output dir exists
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     
@@ -60,19 +66,15 @@ def main():
     print(f"Source Video  : {args.video}")
     print(f"Replacement Ad: {args.ad}")
     print(f"Output Video  : {args.output}")
+    print(f"Model Path    : {args.model}")
     print(f"Blend Alpha   : {args.blend-alpha if hasattr(args, 'blend-alpha') else args.blend_alpha:.2f}")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Running on device: {device}")
     
-    # 1. Load ML Board Detector (our trained UNet)
-    model_path = os.path.join("src", "calibration", "board_segmentation_model.pth")
-    if not os.path.exists(model_path):
-        print(f"Error: Model weights not found at {model_path}!")
-        sys.exit(1)
-        
+    # 1. Load ML Board Detector (our trained UNet or DeepLabV3)
     print("Loading ML Board Detector...")
-    board_detector = MLBoardDetector(model_path=model_path)
+    board_detector = MLBoardDetector(model_path=args.model)
     if not board_detector.is_ready():
         print("Error: Failed to initialize ML Board Detector.")
         sys.exit(1)
