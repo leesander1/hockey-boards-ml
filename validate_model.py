@@ -15,63 +15,96 @@ def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.5):
     return cv2.addWeighted(image, 1.0, colored_mask, alpha, 0)
 
 def main():
-    detector = MLBoardDetector()
+    import argparse
+    parser = argparse.ArgumentParser(description="Validate ML board detection models")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Path to specific model weights file (e.g. src/calibration/board_segmentation_model_unet.pth). If None, validates both models.")
+    args = parser.parse_args()
     
     input_dir = 'annotation_frames/new_batch'
-    output_dir = 'test_images/validation_output'
-    os.makedirs(output_dir, exist_ok=True)
+    output_base_dir = 'test_images/validation_output'
     
-    # Get a mix of regular and newly annotated images
+    # Identify models to validate
+    models_to_test = {}
+    if args.model:
+        name = "custom"
+        if "unet" in args.model.lower():
+            name = "unet"
+        elif "deeplabv3" in args.model.lower() or "board_segmentation_model.pth" in args.model:
+            name = "deeplabv3"
+        models_to_test[name] = args.model
+    else:
+        deeplab_path = os.path.join('src', 'calibration', 'board_segmentation_model.pth')
+        unet_path = os.path.join('src', 'calibration', 'board_segmentation_model_unet.pth')
+        if os.path.exists(deeplab_path):
+            models_to_test['deeplabv3'] = deeplab_path
+        if os.path.exists(unet_path):
+            models_to_test['unet'] = unet_path
+            
+    # Get validation images
     files = sorted(glob.glob(os.path.join(input_dir, '*/*.jpg')))
-    
-    # Let's take just a few to test
+    if not files:
+        print(f"Error: No images found in {input_dir}")
+        sys.exit(1)
+        
     np.random.seed(42)
     test_files = np.random.choice(files, size=min(10, len(files)), replace=False)
     
-    print(f"Running validation on {len(test_files)} images...")
-    for idx, f in enumerate(test_files):
-        img = cv2.imread(f)
-        if img is None:
+    for model_name, model_path in models_to_test.items():
+        print(f"\n--- 🧪 Validating {model_name.upper()} model ({model_path}) ---")
+        detector = MLBoardDetector(model_path=model_path)
+        if not detector.is_ready():
+            print(f"Error: Model {model_name} could not be loaded. Skipping.")
             continue
             
-        success = detector.detect(img)
-        if success:
-            mask = detector.get_board_mask()
-            prob_map = detector.get_probability_map()
-            
-            # Create a composite image: original, prob map, thresholded mask, overlay
-            h, w = img.shape[:2]
-            
-            # Convert prob_map to 8-bit heatmap for visualization
-            prob_heat = np.uint8(prob_map * 255)
-            prob_heat = cv2.applyColorMap(prob_heat, cv2.COLORMAP_JET)
-            prob_heat = cv2.resize(prob_heat, (w, h))
-            
-            # Mask visualization
-            mask_vis = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-            
-            # Overlay
-            overlay = overlay_mask(img.copy(), mask)
-            
-            # Top row: original, overlay
-            # Bottom row: prob map, mask
-            top_row = np.hstack((img, overlay))
-            bottom_row = np.hstack((prob_heat, mask_vis))
-            composite = np.vstack((top_row, bottom_row))
-            
-            # Save
-            base = os.path.basename(f)
-            out_path = os.path.join(output_dir, f"val_v3_{base}")
-            
-            # Add text
-            score = detector.get_confidence_score()
-            cv2.putText(composite, f"Confidence: {score:.3f}", (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            
-            cv2.imwrite(out_path, composite)
-            print(f"Saved {out_path}")
-        else:
-            print(f"Failed detection on {f}")
+        output_dir = os.path.join(output_base_dir, model_name)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        print(f"Running validation on {len(test_files)} images...")
+        for idx, f in enumerate(test_files):
+            img = cv2.imread(f)
+            if img is None:
+                continue
+                
+            success = detector.detect(img)
+            if success:
+                mask = detector.get_board_mask()
+                prob_map = detector.get_probability_map()
+                
+                # Create a composite image: original, prob map, thresholded mask, overlay
+                h, w = img.shape[:2]
+                
+                # Convert prob_map to 8-bit heatmap for visualization
+                prob_heat = np.uint8(prob_map * 255)
+                prob_heat = cv2.applyColorMap(prob_heat, cv2.COLORMAP_JET)
+                prob_heat = cv2.resize(prob_heat, (w, h))
+                
+                # Mask visualization
+                mask_vis = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+                
+                # Overlay
+                overlay = overlay_mask(img.copy(), mask)
+                
+                # Top row: original, overlay
+                # Bottom row: prob map, mask
+                top_row = np.hstack((img, overlay))
+                bottom_row = np.hstack((prob_heat, mask_vis))
+                composite = np.vstack((top_row, bottom_row))
+                
+                # Save
+                base = os.path.basename(f)
+                out_path = os.path.join(output_dir, f"val_{model_name}_{base}")
+                
+                # Add text
+                score = detector.get_confidence_score()
+                cv2.putText(composite, f"Model: {model_name.upper()} | Confidence: {score:.3f}", (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                
+                cv2.imwrite(out_path, composite)
+                print(f"Saved {out_path}")
+            else:
+                print(f"Failed detection on {f}")
 
 if __name__ == '__main__':
     main()
+
