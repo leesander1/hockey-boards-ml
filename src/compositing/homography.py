@@ -83,10 +83,24 @@ class AdCompositor:
         shifted_up[:-thickness, :] = board_mask[thickness:, :]
         bottom_edge = cv2.bitwise_and(board_mask, cv2.bitwise_not(shifted_up))
         
-        # Define colors (BGR)
-        red_color = (30, 30, 200)      # Darker red for the top dasher board
-        yellow_color = (0, 200, 220)   # Yellow for the bottom kickplate
+        # Dynamically sample the red top and yellow bottom colors from the original frame (excluding players)
+        top_edge_clean = cv2.bitwise_and(top_edge, cv2.bitwise_not(player_mask))
+        bottom_edge_clean = cv2.bitwise_and(bottom_edge, cv2.bitwise_not(player_mask))
         
+        top_pixels = frame[top_edge_clean > 0]
+        if len(top_pixels) > 0:
+            sampled_red = np.median(top_pixels, axis=0).astype(int)
+            red_color = (int(sampled_red[0]), int(sampled_red[1]), int(sampled_red[2]))
+        else:
+            red_color = (30, 30, 200)      # Fallback: Darker red
+            
+        bottom_pixels = frame[bottom_edge_clean > 0]
+        if len(bottom_pixels) > 0:
+            sampled_yellow = np.median(bottom_pixels, axis=0).astype(int)
+            yellow_color = (int(sampled_yellow[0]), int(sampled_yellow[1]), int(sampled_yellow[2]))
+        else:
+            yellow_color = (0, 200, 220)   # Fallback: Yellow
+            
         # Create an overlay for the lines
         edge_overlay = np.zeros_like(blended_layer)
         edge_overlay[top_edge > 0] = red_color
