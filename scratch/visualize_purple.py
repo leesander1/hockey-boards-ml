@@ -9,7 +9,7 @@ sys.path.append('src')
 from calibration.ml_board_detector import MLBoardDetector
 
 def main():
-    vid_path = 'data/videos/2026-05-19 23-34-03.mp4'
+    vid_path = 'data/videos/2026-05-12 21-12-18.mp4'
     out_dir = '/Users/leesander/.gemini/antigravity-ide/brain/19cf1bf7-48df-4651-b795-7722108771ff/purple_viz'
     os.makedirs(out_dir, exist_ok=True)
     
