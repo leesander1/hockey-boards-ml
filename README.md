@@ -118,4 +118,5 @@ If you have that mapping saved in JSON, pass it with `--hockeyrink-keypoint-map 
    - https://huggingface.co/Edalik/hockey for additional hockey imagery/data
 - You can also get the ice mask from OpenCV in some broadcasts (ice is white, everything else is darker).
 - For board detection and alignment, use the yellow kickplate / trim lines as a geometric anchor.
+- https://www.youtube.com/watch?v=Kk4UE3LptdA
 

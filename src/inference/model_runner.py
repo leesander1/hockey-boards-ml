@@ -15,7 +15,7 @@ from src.calibration.rink_anchor_fusion import RinkAnchorFusion
 class ModelRunner:
     def __init__(
         self,
-        player_model_path="yolov8n-seg.pt",
+        player_model_path="yolov8m-seg.pt",
         device=None,
         hockeyai_model_path: str | None = None,
         hockeyrink_model_path: str | None = None,
@@ -186,10 +186,10 @@ class ModelRunner:
 
     # ── Player mask via YOLOv8 segmentation ──────────────────────────────────
 
-    def get_player_mask(self, frame: np.ndarray) -> np.ndarray:
+    def get_player_mask(self, frame: np.ndarray, dilation_kernel_size: int = 3) -> np.ndarray:
         """
         Returns a binary mask of all detected players (COCO class 0 = person).
-        The mask is dilated slightly to avoid clipping player edges.
+        The mask is dilated slightly (controlled by dilation_kernel_size) to avoid clipping player edges.
         """
         blank = np.zeros(frame.shape[:2], dtype=np.uint8)
 
@@ -205,9 +205,10 @@ class ModelRunner:
         combined = cv2.resize(combined, (frame.shape[1], frame.shape[0]),
                               interpolation=cv2.INTER_NEAREST)
 
-        # Dilate to give players a small buffer (prevents edge clipping)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        combined = cv2.dilate(combined, kernel, iterations=1)
+        # Dilate to give players a small buffer (prevents edge clipping, optimized from 7x7 to 3x3 for super-tight fit)
+        if dilation_kernel_size >= 3:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_kernel_size, dilation_kernel_size))
+            combined = cv2.dilate(combined, kernel, iterations=1)
         return combined
 
     # ── HSV fallback ──────────────────────────────────────────────────────────

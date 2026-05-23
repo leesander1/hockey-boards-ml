@@ -16,7 +16,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     
     detector = MLBoardDetector()
-    yolo_model = YOLO('yolov8n-seg.pt')
+    yolo_model = YOLO('yolov8m-seg.pt')
     yolo_model.to(device)
     
     cap = cv2.VideoCapture(vid_path)
@@ -45,6 +45,9 @@ def main():
                     m = mask.cpu().numpy()
                     m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
                     player_mask[m > 0] = 255
+            # Dilate to match model_runner's optimized 3x3 buffer
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            player_mask = cv2.dilate(player_mask, kernel, iterations=1)
                     
         # 3. Create Visualization
         viz = frame.copy()

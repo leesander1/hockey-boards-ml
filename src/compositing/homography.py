@@ -45,15 +45,7 @@ class AdCompositor:
         h, w = frame.shape[:2]
         ad_layer = self._get_ad_layer(h, w)
 
-        # Final insertion region: boards that are NOT occluded by players
-        insertion_mask = cv2.bitwise_and(
-            board_mask, cv2.bitwise_not(player_mask)
-        )
-        _, insertion_mask = cv2.threshold(
-            insertion_mask, 127, 255, cv2.THRESH_BINARY
-        )
-
-        mask3 = cv2.merge([insertion_mask] * 3)
+        # Soft blending weights are calculated dynamically at the end to support feathered edge blending
 
         # 1. Blur the original frame strongly to smear out sharp text/logo edges from the original ads.
         # This keeps the overall ambient lighting, gradients, and soft reflections without any readable text.
@@ -121,9 +113,21 @@ class AdCompositor:
         edge_mask_norm = np.expand_dims(edge_mask_norm, axis=-1)
         blended_layer = (edge_overlay * edge_mask_norm + blended_layer * (1.0 - edge_mask_norm)).astype(np.uint8)
 
-        foreground = cv2.bitwise_and(blended_layer, mask3)
-        background = cv2.bitwise_and(frame,    cv2.bitwise_not(mask3))
-        return cv2.add(foreground, background)
+        # Create a feathered (soft-edged) player mask to prevent hard clipping artifacts
+        player_mask_blurred = cv2.GaussianBlur(player_mask, (3, 3), 0)
+        P = player_mask_blurred.astype(np.float32) / 255.0
+        
+        # Slightly anti-alias the board mask edges too for seamless rink blending
+        board_mask_blurred = cv2.GaussianBlur(board_mask, (3, 3), 0)
+        B = board_mask_blurred.astype(np.float32) / 255.0
+        
+        # W represents the final soft-edged compositing weight (0.0 = player/original frame, 1.0 = replacement ad)
+        W = B * (1.0 - P)
+        W3 = np.expand_dims(W, axis=-1)  # shape (h, w, 1) for broadcasting
+        
+        # Blending equation: blended_layer * W3 + frame * (1.0 - W3)
+        composited = blended_layer.astype(np.float32) * W3 + frame.astype(np.float32) * (1.0 - W3)
+        return np.clip(composited, 0, 255).astype(np.uint8)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

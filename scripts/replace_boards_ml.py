@@ -33,6 +33,8 @@ def main():
                         help="Blending alpha: 1.0 = fully opaque new texture, 0.0 = fully original (default: 0.70)")
     parser.add_argument("--model", type=str, default=os.path.join("src", "calibration", "board_segmentation_model.pth"),
                         help="Path to trained model weights (.pth)")
+    parser.add_argument("--player-model", type=str, default="yolov8m-seg.pt",
+                        help="Path to YOLOv8 player segmentation model weights (.pt)")
     
     args = parser.parse_args()
     
@@ -79,9 +81,9 @@ def main():
         print("Error: Failed to initialize ML Board Detector.")
         sys.exit(1)
         
-    # 2. Load Model Runner for Player Segmentation
+    # 2. Load Model Runner for Player Occlusion Segmentation
     print("Loading YOLOv8 Player Segmentation...")
-    runner = ModelRunner(player_model_path="yolov8n-seg.pt", device=device)
+    runner = ModelRunner(player_model_path=args.player_model, device=device)
     
     # 3. Load Ad Compositor
     compositor = AdCompositor(ad_image_path=args.ad)
