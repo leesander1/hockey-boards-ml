@@ -23,7 +23,9 @@ The replacement dasher-board panel is drawn using a customized HD white matte te
 ## 🖼️ Diagnostic & Visual Gallery
 
 ### I. U-Net Board Segmentation (Full Thickness)
-Below are side-by-side examples from the U-Net model validation, demonstrating complete coverage of curved boards and stands rejection:
+
+#### A. Successful Validation Cases (High Accuracy)
+Below are side-by-side examples from successful U-Net model validation, demonstrating complete coverage of curved boards and stands rejection:
 
 ![U-Net Board Validation 1](images/unet_val_1.jpg)
 *Figure 1: Car vs Phi broadcast validation showing raw frame (top-left), green board prediction (top-right), confidence heatmap (bottom-left), and thresholded mask (bottom-right).*
@@ -31,17 +33,33 @@ Below are side-by-side examples from the U-Net model validation, demonstrating c
 ![U-Net Board Validation 2](images/unet_val_2.jpg)
 *Figure 2: Col vs Min validation showing perfect, curved-board physical coverage.*
 
+#### B. Challenging Cases & Failure Modes (Imperfect Masks)
+To ensure honest validation and identify room for calibration, we analyze visual edge cases where the U-Net model encounters noise or displays overconfidence:
+
+![U-Net Stands Leakage](images/unet_val_bad_1.jpg)
+*Figure 3: Stands Leakage (Stands Leak: 18.32% | Confidence: 1.0000). In this frame, player reflections and bench clutter cause the U-Net to erroneously classify spectators as boards. Notice that the confidence score is still 1.0000—demonstrating the network's overconfidence in its classification mistakes.*
+
+![U-Net Low Confidence](images/unet_val_bad_2.jpg)
+*Figure 4: Low Confidence Frame (Confidence: 0.6323 | Stands Leak: 2.01%). Heavy camera motion blur and extreme ice reflections degrade the network's output confidence, visible as a faded yellow/green probability heatmap.*
+
+> [!NOTE]
+> **Why do imperfect frames show a Confidence of 1.0000?**
+> The U-Net detector calculates its scalar confidence score using the **99.5th percentile of raw predicted probabilities** in the output map:
+> $$\text{Confidence} = \text{percentile}(P_{\text{raw}}, 99.5)$$
+> Deep neural networks are highly bimodal—pixels are predicted as either very close to 0.0 (non-board) or very close to 1.0 (board). Even when the network makes a spatial mistake (e.g. leaking into the spectator stands as in Figure 3), it is mathematically **overconfident in its predictions**, meaning the top 0.5% of predicted pixels still hold a probability value of `0.9999` or higher. This rounds to exactly `1.000` in the visualization.
+
+
 ### II. YOLOv8 Player Highlight & Board Subtraction
 Run `scratch/visualize_purple.py` to examine player silhouettes and ad subtraction boundaries:
 
 ![YOLO Player Subtraction](images/purple_viz_frame_100.jpg)
-*Figure 3: Left side highlights detected players in purple and boards in green. Right side displays the final subtracted area that will be replaced with new ads.*
+*Figure 5: Left side highlights detected players in purple and boards in green. Right side displays the final subtracted area that will be replaced with new ads.*
 
 ### III. Final Edge-Snapped Compositing (Frame 100)
 Extracted frame 100 of the final composited video. Notice how the neutral off-white tiled boards sit perfectly behind the players and sticks:
 
 ![Composite Frame 100](images/composite_frame_100.jpg)
-*Figure 4: Frame 100 demonstrating the Guided Filter edge-snapping players and equipment seamlessly onto the white matte replacement boards.*
+*Figure 6: Frame 100 demonstrating the Guided Filter edge-snapping players and equipment seamlessly onto the white matte replacement boards.*
 
 ### IV. Panning Sequence Keyframes (Frames 10, 50, 90, 130)
 The Guided Filter tracks and snaps boundaries dynamically across high-speed horizontal camera panning:
