@@ -33,3 +33,13 @@ __pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Colab
+colab_training_data.zip
+
+# Downloaded Models
+yolov8m-seg.pt
+yolov8n-seg.pt
+
+scratch/
+scripts/archive/

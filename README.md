@@ -55,23 +55,18 @@ Extracted frame 100 of the final composited video. Notice how the neutral off-wh
 ### IV. Panning Sequence Keyframes (Frames 10, 50, 90, 130)
 The Guided Filter tracks and snaps boundaries dynamically across high-speed horizontal camera panning:
 
-````carousel
-### Frame 10: Seamless Player & Stick Cutouts
-![Frame 10](images/frame_010.jpg)
-*High-fidelity separation around player boundaries and sweeping sticks.*
-<!-- slide -->
-### Frame 50: Net, Goalie, and Goalposts
-![Frame 50](images/frame_050.jpg)
-*The goalie net and goal posts remain completely pristine and crisp in front of the new white dashers.*
-<!-- slide -->
-### Frame 90: Clumped Puck Battle Near Glass
-![Frame 90](images/frame_090.jpg)
-*Excellent edge-snapped separation even when multiple players clump directly on the boards.*
-<!-- slide -->
-### Frame 130: Fast-Motion Stick Crossing
-![Frame 130](images/frame_130.jpg)
-*Zero board bleed or haloing around sticks crossing the replaced dasher panels.*
-````
+![Composite Frame 10](images/composite_frame_010.jpg)
+*Figure 5: Composite Frame 10.*
+
+![Composite Frame 50](images/composite_frame_050.jpg)
+*Figure 6: Composite Frame 50.*
+
+![Composite Frame 90](images/composite_frame_090.jpg)
+*Figure 7: Composite Frame 90.*
+
+![Composite Frame 130](images/composite_frame_130.jpg)
+*Figure 8: Composite Frame 130.*
+
 
 ---
 
