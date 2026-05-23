@@ -113,9 +113,10 @@ class AdCompositor:
         edge_mask_norm = np.expand_dims(edge_mask_norm, axis=-1)
         blended_layer = (edge_overlay * edge_mask_norm + blended_layer * (1.0 - edge_mask_norm)).astype(np.uint8)
 
-        # Create a feathered (soft-edged) player mask to prevent hard clipping artifacts
-        player_mask_blurred = cv2.GaussianBlur(player_mask, (3, 3), 0)
-        P = player_mask_blurred.astype(np.float32) / 255.0
+        # Apply Guided Filter to snap the player mask to the high-contrast physical edges in the original frame
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        p = player_mask.astype(np.float32) / 255.0
+        P = self._guided_filter(gray_frame, p, r=4, eps=0.01)
         
         # Slightly anti-alias the board mask edges too for seamless rink blending
         board_mask_blurred = cv2.GaussianBlur(board_mask, (3, 3), 0)
@@ -130,6 +131,31 @@ class AdCompositor:
         return np.clip(composited, 0, 255).astype(np.uint8)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _guided_filter(self, I: np.ndarray, p: np.ndarray, r: int = 4, eps: float = 0.01) -> np.ndarray:
+        """
+        Fast Edge-Preserving Guided Image Filter.
+        Refines mask `p` using guide image `I` (grayscale [0.0, 1.0]).
+        """
+        N = cv2.boxFilter(np.ones_like(I), -1, (2 * r + 1, 2 * r + 1))
+        
+        mean_I = cv2.boxFilter(I, -1, (2 * r + 1, 2 * r + 1)) / N
+        mean_p = cv2.boxFilter(p, -1, (2 * r + 1, 2 * r + 1)) / N
+        mean_Ip = cv2.boxFilter(I * p, -1, (2 * r + 1, 2 * r + 1)) / N
+        
+        cov_Ip = mean_Ip - mean_I * mean_p
+        
+        mean_II = cv2.boxFilter(I * I, -1, (2 * r + 1, 2 * r + 1)) / N
+        var_I = mean_II - mean_I * mean_I
+        
+        a = cov_Ip / (var_I + eps)
+        b = mean_p - a * mean_I
+        
+        mean_a = cv2.boxFilter(a, -1, (2 * r + 1, 2 * r + 1)) / N
+        mean_b = cv2.boxFilter(b, -1, (2 * r + 1, 2 * r + 1)) / N
+        
+        q = mean_a * I + mean_b
+        return np.clip(q, 0.0, 1.0)
 
     def _get_ad_layer(self, h: int, w: int) -> np.ndarray:
         """Return the ad image tiled to (h, w) to preserve its resolution and detail, creating it once."""

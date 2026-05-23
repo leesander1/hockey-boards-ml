@@ -58,7 +58,7 @@ def main():
                 
             # Run inference
             board_mask = runner.get_board_mask(frame)
-            player_mask = runner.get_player_mask(frame)
+            player_mask = runner.get_player_mask(frame, dilation_kernel_size=0)
             
             # Composite ad
             composited = compositor.apply_ad(frame, board_mask, player_mask)

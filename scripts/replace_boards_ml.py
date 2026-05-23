@@ -128,8 +128,8 @@ def main():
             else:
                 board_mask = np.zeros((height, width), dtype=np.uint8)
                 
-            # B. Detect players (YOLOv8 instance segmentation)
-            player_mask = runner.get_player_mask(frame)
+            # B. Detect players (YOLOv8 instance segmentation, raw tight mask to be refined by Guided Filter)
+            player_mask = runner.get_player_mask(frame, dilation_kernel_size=0)
             
             # C. Blend ad behind players inside board area
             composited = compositor.apply_ad(frame, board_mask, player_mask, blend_alpha=args.blend_alpha)

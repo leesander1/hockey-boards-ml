@@ -45,9 +45,8 @@ def main():
                     m = mask.cpu().numpy()
                     m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
                     player_mask[m > 0] = 255
-            # Dilate to match model_runner's optimized 3x3 buffer
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            player_mask = cv2.dilate(player_mask, kernel, iterations=1)
+            # No dilation to match model_runner's raw YOLO output refined by Guided Filter
+            pass
                     
         # 3. Create Visualization
         viz = frame.copy()
