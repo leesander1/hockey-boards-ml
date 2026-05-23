@@ -27,11 +27,14 @@ The replacement dasher-board panel is drawn using a customized HD white matte te
 #### A. Successful Validation Cases (High Accuracy)
 Below are side-by-side examples from successful U-Net model validation, demonstrating complete coverage of curved boards and stands rejection:
 
-![U-Net Board Validation 1](images/unet_val_1.jpg)
-*Figure 1: Car vs Phi broadcast validation showing raw frame (top-left), green board prediction (top-right), confidence heatmap (bottom-left), and thresholded mask (bottom-right).*
+![U-Net Board Validation 1](images/val_unet_2026-05-19_23-29-50_f0384.jpg)
+*Figure 1: Col vs Min broadcast validation showing raw frame (top-left), green board prediction (top-right), confidence heatmap (bottom-left), and thresholded mask (bottom-right).*
 
-![U-Net Board Validation 2](images/unet_val_2.jpg)
-*Figure 2: Col vs Min validation showing perfect, curved-board physical coverage.*
+![U-Net Board Validation 2](images/val_unet_2026-05-19_23-34-03_f0308.jpg)
+*Figure 2: Game Action neutral zone panning broadcast validation.*
+
+![U-Net Board Validation 3](images/val_unet_2026-05-19_23-26-41_f0231.jpg)
+*Figure 3: Game Action fast transition play validation.*
 
 > [!NOTE]
 > **Why do imperfect frames show a Confidence of 1.0000?**
@@ -44,13 +47,13 @@ Below are side-by-side examples from successful U-Net model validation, demonstr
 Run `scratch/visualize_purple.py` to examine player silhouettes and ad subtraction boundaries:
 
 ![YOLO Player Subtraction](images/purple_viz_frame_100.jpg)
-*Figure 3: Left side highlights detected players in purple and boards in green. Right side displays the final subtracted area that will be replaced with new ads.*
+*Figure 4: Left side highlights detected players in purple and boards in green. Right side displays the final subtracted area that will be replaced with new ads.*
 
 ### III. Final Edge-Snapped Compositing (Frame 100)
 Extracted frame 100 of the final composited video. Notice how the neutral off-white tiled boards sit perfectly behind the players and sticks:
 
 ![Composite Frame 100](images/composite_frame_100.jpg)
-*Figure 4: Frame 100 demonstrating the Guided Filter edge-snapping players and equipment seamlessly onto the white matte replacement boards.*
+*Figure 5: Frame 100 demonstrating the Guided Filter edge-snapping players and equipment seamlessly onto the white matte replacement boards.*
 
 ### IV. Panning Sequence Keyframes (Frames 10, 50, 90, 130)
 The Guided Filter tracks and snaps boundaries dynamically across high-speed horizontal camera panning:
