@@ -70,8 +70,8 @@ class AdCompositor:
         blended_layer = cv2.addWeighted(ad_layer, blend_alpha, ambient_light, 1.0 - blend_alpha, 0)
 
         # 4. Add Top Red Line and Bottom Yellow Line to the ad layer
-        # Calculate thickness based on frame height (approx 1.5%)
-        thickness = max(2, int(h * 0.015))
+        # Calculate thickness based on frame height (approx 0.3%, way smaller than 1.5%)
+        thickness = max(1, int(h * 0.003))
         
         # Find top edge by shifting the mask down
         shifted_down = np.zeros_like(board_mask)
@@ -94,8 +94,13 @@ class AdCompositor:
         
         # Create an edge mask for blending
         edge_mask = cv2.bitwise_or(top_edge, bottom_edge)
-        # Blur the edge mask slightly to anti-alias and make it look smooth
-        edge_mask_blurred = cv2.GaussianBlur(edge_mask, (5, 5), 0)
+        # Blur the edge mask slightly to anti-alias and make it look smooth (avoid washing out thin lines)
+        if thickness >= 5:
+            edge_mask_blurred = cv2.GaussianBlur(edge_mask, (5, 5), 0)
+        elif thickness >= 3:
+            edge_mask_blurred = cv2.GaussianBlur(edge_mask, (3, 3), 0)
+        else:
+            edge_mask_blurred = edge_mask
         
         # Blend the lines into the blended_layer
         edge_mask_norm = edge_mask_blurred.astype(np.float32) / 255.0
