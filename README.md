@@ -55,16 +55,16 @@ Extracted frame 100 of the final composited video. Notice how the neutral off-wh
 ### IV. Panning Sequence Keyframes (Frames 10, 50, 90, 130)
 The Guided Filter tracks and snaps boundaries dynamically across high-speed horizontal camera panning:
 
-![Composite Frame 10](images/composite_frame_010.jpg)
+![Composite Frame 10](images/frame_010.jpg)
 *Figure 5: Composite Frame 10.*
 
-![Composite Frame 50](images/composite_frame_050.jpg)
+![Composite Frame 50](images/frame_050.jpg)
 *Figure 6: Composite Frame 50.*
 
-![Composite Frame 90](images/composite_frame_090.jpg)
+![Composite Frame 90](images/frame_090.jpg)
 *Figure 7: Composite Frame 90.*
 
-![Composite Frame 130](images/composite_frame_130.jpg)
+![Composite Frame 130](images/frame_130.jpg)
 *Figure 8: Composite Frame 130.*
 
 
