@@ -19,9 +19,26 @@ def main():
     parser = argparse.ArgumentParser(description="Validate ML board detection models")
     parser.add_argument("--model", type=str, default=None,
                         help="Path to specific model weights file (e.g. src/calibration/board_segmentation_model_unet.pth). If None, validates both models.")
+    parser.add_argument("--input-dir", type=str, default=None,
+                        help="Path to validation images directory. If None, checks several standard locations.")
     args = parser.parse_args()
     
-    input_dir = 'annotation_frames/new_batch'
+    input_dir = args.input_dir
+    if not input_dir:
+        # Fallback search order
+        candidates = [
+            'annotation_frames/new_batch',
+            'colab_training_data/annotation_frames/new_batch',
+            'scratch/training_data/colab_training_data/annotation_frames/new_batch',
+            'test_images/annotation_frames/new_batch'
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate) and (glob.glob(os.path.join(candidate, '*/*.jpg')) or glob.glob(os.path.join(candidate, '*.jpg'))):
+                input_dir = candidate
+                break
+        if not input_dir:
+            input_dir = 'colab_training_data/annotation_frames/new_batch' # default fallback
+            
     output_base_dir = 'test_images/validation_output'
     
     # Identify models to validate
