@@ -128,10 +128,15 @@ class AdCompositor:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _get_ad_layer(self, h: int, w: int) -> np.ndarray:
-        """Return the ad image resized to (h, w), creating it once."""
+        """Return the ad image tiled to (h, w) to preserve its resolution and detail, creating it once."""
         if self._base_ad is None or self._base_ad.shape[:2] != (h, w):
             if self.ad_image is not None:
-                self._base_ad = cv2.resize(self.ad_image, (w, h))
+                th, tw = self.ad_image.shape[:2]
+                rep_y = int(np.ceil(h / th))
+                rep_x = int(np.ceil(w / tw))
+                tiled = np.tile(self.ad_image, (rep_y, rep_x, 1))
+                # Make it "less white" (approx 80% brightness) to look natural under arena lighting
+                self._base_ad = (tiled[:h, :w].astype(float) * 0.80).astype(np.uint8)
             else:
                 # Green placeholder so the board region is clearly visible
                 self._base_ad = np.zeros((h, w, 3), dtype=np.uint8)
